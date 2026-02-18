@@ -10,7 +10,7 @@ st.title("🤼 Season Points Leaderboard")
 @st.cache_data
 def load_data():
     # Use the master file which contains all entries
-    df = pd.read_csv("Wrestler List.xlsx - master.csv")
+    df = pd.read_csv("Wrestler List.xlsx")
     
     # Ensure points are treated as numbers
     df['points'] = pd.to_numeric(df['points'], errors='coerce').fillna(0)
