@@ -1,90 +1,75 @@
 import streamlit as st
 import pandas as pd
-import glob
-import os
 
-# 1. Setup Page
+# 1. Setup Page Config
 st.set_page_config(page_title="Wrestling Points Leaderboard", layout="wide")
 st.title("🤼 Season Points Leaderboard")
-st.markdown("### Combined Rankings from All Divisions")
 
-# 2. Smart Data Loader
+# 2. Load Data
+# Note: Ensure "Wrestler List.xlsx - master.csv" is in the same folder as this script.
 @st.cache_data
-def load_all_data():
-    # This line looks for ALL files in your folder that start with "Wrestler List"
-    all_files = glob.glob("Wrestler List*.csv")
+def load_data():
+    # Use the master file which contains all entries
+    df = pd.read_csv("Wrestler List.xlsx - master.csv")
     
-    data_frames = []
+    # Ensure points are treated as numbers
+    df['points'] = pd.to_numeric(df['points'], errors='coerce').fillna(0)
     
-    for filename in all_files:
-        # Skip the "master" and "tot" files to avoid double-counting 
-        # (since the other sheets have the individual data)
-        if "master" in filename.lower() or "tot" in filename.lower():
-            continue
-            
-        df = pd.read_csv(filename)
-        
-        # Standardize columns (some of your sheets use 'Full Name', others might differ)
-        # We only keep what we need for the leaderboard
-        cols_to_keep = ['Full Name', 'Team Name', 'points', 'Division', 'Weight']
-        
-        # Filter to only the columns that exist in this specific file
-        existing_cols = [c for c in cols_to_keep if c in df.columns]
-        df = df[existing_cols]
-        
-        data_frames.append(df)
+    # Clean up column names and strings
+    df['Full Name'] = df['Full Name'].str.strip()
+    df['Division'] = df['Division'].str.strip()
+    df['Team Name'] = df['Team Name'].fillna("Unattached")
     
-    # Combine all sheets (D1, D2, G1, G2, etc.) into one master list
-    combined_df = pd.concat(data_frames, ignore_index=True)
-    
-    # Clean data
-    combined_df['points'] = pd.to_numeric(combined_df['points'], errors='coerce').fillna(0)
-    combined_df['Full Name'] = combined_df['Full Name'].str.strip()
-    combined_df['Team Name'] = combined_df['Team Name'].fillna("Unattached")
-    
-    return combined_df
+    return df
 
-# Load the data
-try:
-    df = load_all_data()
-except Exception as e:
-    st.error("Make sure your CSV files are in the same folder as this script!")
-    st.stop()
+df = load_data()
 
-# 3. Process Leaderboard
+# 3. Process Leaderboard (Summing Points)
+# We group by Name and Division to get the total season score
 leaderboard = df.groupby(['Full Name', 'Division', 'Team Name'])['points'].sum().reset_index()
 leaderboard = leaderboard.sort_values(by='points', ascending=False)
 
-# 4. Sidebar Filters
-st.sidebar.header("Filters")
-div_list = ["All Divisions"] + sorted(leaderboard['Division'].unique().tolist())
-selected_div = st.sidebar.selectbox("Select Division", div_list)
+# Add a Rank column based on points
+leaderboard['Rank'] = leaderboard['points'].rank(ascending=False, method='min').astype(int)
 
+# 4. Sidebar Controls
+st.sidebar.header("Filter Rankings")
+
+# Division Filter
+division_list = ["All Divisions"] + sorted(leaderboard['Division'].unique().tolist())
+selected_division = st.sidebar.selectbox("Choose a Division:", division_list)
+
+# Search Bar
 search_query = st.text_input("🔍 Search for a Wrestler Name:", "")
 
-# 5. Filter Data
+# 5. Apply Filters
 display_df = leaderboard.copy()
-if selected_div != "All Divisions":
-    display_df = display_df[display_df['Division'] == selected_div]
+
+if selected_division != "All Divisions":
+    display_df = display_df[display_df['Division'] == selected_division]
+    # Recalculate rank within the specific division
+    display_df['Rank'] = display_df['points'].rank(ascending=False, method='min').astype(int)
 
 if search_query:
     display_df = display_df[display_df['Full Name'].str.contains(search_query, case=False)]
 
-# Assign Ranks
-display_df['Rank'] = display_df['points'].rank(ascending=False, method='min').astype(int)
-
-# 6. Display Rankings
+# 6. UI Display
 if not display_df.empty:
-    # Top 3 Podium
+    st.subheader(f"Rankings for {selected_division}")
+    
+    # Top 3 Highlight (Podium)
     if not search_query and len(display_df) >= 3:
-        st.subheader("🏆 Division Leaders")
-        c1, c2, c3 = st.columns(3)
-        top = display_df.head(3).values
-        c2.metric("🥇 1st Place", f"{top[0][0]}", f"{int(top[0][3])} pts")
-        c1.metric("🥈 2nd Place", f"{top[1][0]}", f"{int(top[1][3])} pts")
-        c3.metric("🥉 3rd Place", f"{top[2][0]}", f"{int(top[2][3])} pts")
+        cols = st.columns(3)
+        top3 = display_df.head(3).values
+        with cols[1]: # 1st Place
+            st.metric("🥇 1st Place", f"{top3[0][0]}", f"{int(top3[0][3])} pts")
+        with cols[0]: # 2nd Place
+            st.metric("🥈 2nd Place", f"{top3[1][0]}", f"{int(top3[1][3])} pts")
+        with cols[2]: # 3rd Place
+            st.metric("🥉 3rd Place", f"{top3[2][0]}", f"{int(top3[2][3])} pts")
         st.divider()
 
+    # Full Table
     st.dataframe(
         display_df[['Rank', 'Full Name', 'points', 'Division', 'Team Name']],
         column_config={
@@ -95,4 +80,7 @@ if not display_df.empty:
         use_container_width=True
     )
 else:
-    st.warning("No data found for the selected criteria.")
+    st.warning("No wrestlers found for the selected filters.")
+
+# 7. Division Stats
+st.sidebar.info(f"Total Wrestlers: {len(display_df)}")
